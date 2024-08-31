@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Web AR / Beauty | Banuba SDK</title>
+    <link
+      rel="icon"
+      href="https://www.banuba.com/hubfs/Banuba_November2018/Images/Banuba%20SDK.png"
+    />
+    <link rel="stylesheet" href="assets/buefy.min.css" />
+    <style>
+      html,
+      body,
+      #webar {
+        overflow: hidden;
+        width: 100%;
+        height: 100%;
+      }
+      #webar {
+        display: flex;
+        align-content: center;
+        justify-content: center;
+        position: relative;
+      }
+      #webar > canvas {
+        max-width: 100%;
+        max-height: 100%;
+      }
+    </style>
+  </head>
+
+  <body>
+    <bnb-app>
+      <div id="webar"></div>
+    </bnb-app>
+  
+    <div id="speech-to-text" style="position: absolute; text-align: right; bottom: 10; width: 256px;">
+      <div id="speech-output-container" class="scrollable-container">
+        <p id="transcript" class="transcript-box">Chat with StyleMe Bot!</p>
+        <!-- <p id="output-area" class="output-box"></p> -->
+      </div>
+      <button id="record-button" class="styled-button">
+        <img id="record-icon" src="assets/icons/audio-off.svg" alt="Start Recording" />
+      </button>
+    </div>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", function() {
+        const webarElement = document.getElementById('webar');
+        const speechToTextElement = document.getElementById('speech-to-text');
+
+        function positionSpeechToText() {
+            const webarRect = webarElement.getBoundingClientRect();
+            speechToTextElement.style.bottom = `${window.innerHeight - webarRect.bottom}px`;
+            speechToTextElement.style.left = `${webarRect.right + 25}px`;
+        }
+
+        positionSpeechToText();
+        window.addEventListener('resize', positionSpeechToText);
+      });
+    </script>
+  
+    <style>
+      .scrollable-container {
+        max-height: 256px;
+        max-width: 256px;
+        /* padding-left: 10px; */
+        overflow-y: auto;
+        padding-right: 2px;
+        padding-left: 2px;
+        /* border: 2px solid #b9c7f1; */
+        /* background-color: #f9f9f9; */
+        /* border-radius: 8px; */
+        /* border-style: dashed; */
+        position: relative;
+      }
+
+      .styled-button {
+        background-color: #ffffff;
+        border: 1px solid #f5f5f5;
+        border-radius: 5px;
+        padding: 10px;
+        box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
+        cursor: pointer;
+        margin-top: 10px;
+      }
+  
+      .styled-button img {
+        height: 24px;
+        width: 24px;
+      }
+  
+      .transcript-box {
+        display: inline-block;
+        font-size: 15px;
+        color: #4f68b0; /* Change text color to match the page's blue */
+        background-color: rgba(255, 255, 255, 0.9); /* Light background with some transparency */
+        border-radius: 8px;
+        padding: 10px 10px;
+        box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
+        max-width: 240px; /* Optional: Limit the width of the transcript box */
+        word-wrap: break-word; /* Ensure text wraps within the box */
+        margin-top: 10px; /* Add space between the button and the transcript */
+        margin-bottom: 10px;
+        text-align: left;
+      }
+
+      .output-box {
+        font-size: 16px;
+        color: #ffffff;
+        background-color: #4f68b0;
+        border-radius: 8px;
+        padding: 15px;
+        box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
+        word-wrap: break-word;
+        margin-bottom: 10px;
+        text-align: left;
+        /* padding-left: 1px; */
+      }
+    </style>
+
+    <script src="BanubaClientToken.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
+    <script type="module">
+      import {
+        Effect,
+        Webcam,
+        Image,
+        Player,
+        Module,
+        ImageCapture,
+        Dom,
+      } from "https://cdn.jsdelivr.net/npm/@banuba/webar@1.10.0/dist/BanubaSDK.browser.esm.min.js"
+      import { zipSync as zip } from "https://cdn.jsdelivr.net/npm/fflate@0.6.4/esm/browser.min.js"
+      import App from "./src/app.js"
+      import Store from "./src/store.js"
+
+      App.$children[0].toggleLoading()
+
+      !(async () => {
+        let input
+        let source
+        const [player, modules, effect] = await Promise.all([
+          Player.create({
+            devicePixelRatio: 1,
+            clientToken: window.BANUBA_CLIENT_TOKEN,
+          }),
+          Module.preload(
+            ["background", "eyes", "face_tracker", "hair", "lips", "skin"].map(
+              (m) => `https://cdn.jsdelivr.net/npm/@banuba/webar@1.10.0/dist/modules/${m}.zip`
+            )
+          ),
+          Effect.preload("assets/Makeup_new_morphs.zip"),
+        ])
+        await player.addModule(...modules)
+        await player.applyEffect(effect)
+
+        App.$children[0].toggleLoading()
+
+        //#region fps count
+        const fps = {
+          cam: 0,
+          processing: 0,
+          render: 0,
+        }
+        player.addEventListener("framereceived", () => fps.cam++)
+        player.addEventListener("frameprocessed", ({ detail }) => fps.processing = 1000 / detail.averagedDuration)
+        player.addEventListener("framerendered", () => fps.render++)
+
+        setInterval(() => {
+          Object.entries(fps).forEach(([name, value]) => {
+            fps[name] = 0
+            document.getElementById(name).innerText = value.toFixed(1)
+          })
+        }, 1000)
+        //#endregion
+
+        const useWebcam = async () => {
+          source = "webcam"
+          player.use((input = new Webcam()))
+          player.play()
+        }
+        const useImage = async (file) => {
+          source = "image"
+          player.use((input = new Image(file)))
+          player.play()
+        }
+        const takeScreenshot = async () => {
+          const capture = new ImageCapture(player)
+          download(await capture.takePhoto(), "WebAR_Beauty")
+        }
+        const stop = async () => {
+          input?.stop?.()
+        }
+
+        const resizeObserver = new ResizeObserver(
+          ([{ target, contentRect }]) =>
+            (target.style.objectFit = contentRect.height > contentRect.width ? "contain" : "cover")
+        )
+        const render = () => {
+          Dom.render(player, "#webar")
+          resizeObserver.observe(document.querySelector("#webar > canvas"))
+        }
+        const unmount = () => Dom.unmount("#webar")
+
+        const writeFile = (file) =>
+          (file instanceof File ? Promise.resolve(file) : fetch(file))
+            .then((res) => res.arrayBuffer())
+            .then((buffer) => effect.writeFile(file.name || file, buffer))
+        const evalJs = (code, files = []) =>
+          Promise.all(files.filter(Boolean).map(writeFile)).then(() => effect.evalJs(code))
+
+        const visibilityChangeListener = async () => {
+          const isActive = document.visibilityState === "visible"
+
+          if (source !== "webcam") return
+
+          if (!isActive) {
+            input.stop()
+          } else {
+            await useWebcam()
+          }
+        }
+        document.addEventListener("visibilitychange", visibilityChangeListener)
+
+        App.$on("camera-request", () => useWebcam().then(render))
+        App.$on("photo-uploaded", (file) => useImage(file).then(render))
+        App.$on("screenshot-request", takeScreenshot)
+        App.$on("close-request", stop), App.$on("close-request", unmount)
+        App.$on("preset-download-request", (preset) =>
+          download(appendToConfig(effect, presetToCode(preset)), "Makeup.zip")
+        )
+        App.$on("preset-copy-request", (preset) => copyToClipboard(presetToCode(preset)))
+        App.$on("close-request", stop), App.$on("close-request", unmount)
+
+        Store.on("look:changed", ({ texture = "" }) =>
+          evalJs(`Makeup.set("${texture}")`, [texture])
+        )
+        Store.on("face-makeup:changed", (name, { color, enabled }) =>
+          evalJs(`Makeup.${name}("${enabled ? color : "0 0 0 0"}")`)
+        )
+        Store.on("eyes-makeup:changed", (name, { color, enabled }) =>
+          evalJs(`Makeup.${name}("${enabled ? color : "0 0 0 0"}")`)
+        )
+        Store.on("skin:changed", (name, { color, enabled, strength }) => {
+          typeof strength !== "undefined"
+            ? evalJs(`Skin.${name}(${strength})`)
+            : evalJs(`Skin.${name}("${enabled ? color : "0 0 0 0"}")`)
+        })
+        Store.on("morphs:changed", (name, { strength }) => evalJs(`FaceMorph.${name}(${strength})`))
+        Store.on("teeth-whitening:changed", ({ strength }) =>
+          evalJs(`Teeth.whitening(${strength})`)
+        )
+        Store.on("eyes:changed", (name, { enabled, color, strength }) => {
+          typeof strength !== "undefined"
+            ? evalJs(`Eyes.${name}(${strength})`)
+            : evalJs(`Eyes.${name}("${enabled ? color : "0 0 0 0"}")`)
+        })
+        Store.on("eyelashes:changed", ({ enabled, color }) => {
+          evalJs(`Eyelashes.color("${enabled ? color : "0 0 0 0"}")`)
+        })
+        Store.on("brows:changed", ({ enabled, color }) =>
+          evalJs(`Brows.color("${enabled ? color : "0 0 0 0"}")`)
+        )
+        Store.on("softlight:changed", ({ strength }) => evalJs(`Softlight.strength(${strength})`))
+        Store.on("hair:changed", ({ enabled, color }) =>
+          evalJs(`Hair.color(${enabled ? color.map((c) => `"${c}"`) : `"0 0 0 0"`})`)
+        )
+        Store.on("lipstick:changed", ({ enabled, color }) =>
+          evalJs(`Lips.color("${enabled ? color : "0 0 0 0"}")`)
+        )
+        Store.on("lipstick-params:changed", (name, { value }) => evalJs(`Lips.${name}(${value})`))
+        Store.on("background:changed", async (name, value) => {
+          if (name === "texture" && typeof value === "string") value = await createFile(value)
+          evalJs(
+            `Background.${name}(${
+              value instanceof File
+                ? `"${value.name}"`
+                : typeof value === "string"
+                ? `"${value}"`
+                : value
+            })`,
+            value instanceof File ? [value] : []
+          )
+        })
+        Store.on("lut:changed", ({ texture = "" }) => evalJs(`Filter.set("${texture}")`, [texture]))
+      })()
+
+      /* Utils */
+      function appendToConfig(effect, code) {
+        code = new TextEncoder().encode(code)
+        // these properties are private, don't use them in your code
+        const data = effect["_resource"]["_data"]
+        const cfg = data["config.js"]
+
+        return { ...data, "config.js": new Uint8Array([...cfg, ...code]) }
+      }
+
+      function presetToCode({
+        background,
+        brows,
+        eyelashes,
+        eyes,
+        eyesMakeup,
+        hair,
+        lipstick,
+        lipstickParams,
+        look,
+        lut,
+        morphs,
+        faceMakeup,
+        skin,
+        softlight,
+        teethWhitening,
+      }) {
+        const commands = []
+
+        if (background)
+          for (const [name, value] of Object.entries(background))
+            commands.push(`Background.${name}(${typeof value === "string" ? `"${value}"` : value})`)
+
+        if (brows) commands.push(`Brows.color("${brows}")`)
+
+        if (eyelashes) commands.push(`Eyelashes.color("${eyelashes}")`)
+
+        if (eyes)
+          for (const [name, value] of Object.entries(eyes)) commands.push(`Eyes.${name}(${value})`)
+
+        if (eyesMakeup)
+          for (const [name, value] of Object.entries(eyesMakeup))
+            commands.push(`Makeup.${name}("${value}")`)
+
+        if (hair) commands.push(`Hair.color(${hair.map((c) => `"${c}"`)})`)
+
+        if (lipstick) commands.push(`Lips.color("${lipstick}")`)
+
+        if (lipstickParams)
+          for (const [name, value] of Object.entries(lipstickParams))
+            commands.push(`Lips.${name}(${value})`)
+
+        if (look) commands.push(`Makeup.set("${look}")`)
+
+        if (lut) commands.push(`Filter.set("${lut}")`)
+
+        if (morphs) for (const name in morphs) commands.push(`FaceMorph.${name}(${morphs[name]})`)
+
+        if (faceMakeup)
+          for (const [name, value] of Object.entries(faceMakeup))
+            commands.push(`Makeup.${name}("${value}")`)
+
+        if (skin)
+          for (const [name, value] of Object.entries(skin))
+            commands.push(`Skin.${name}(${typeof value === "string" ? `"${value}"` : value})`)
+
+        if (softlight) commands.push(`Softlight.strength(${softlight})`)
+
+        if (teethWhitening) commands.push(`Teeth.whitening(${teethWhitening})`)
+
+        return commands.join(";\n")
+      }
+
+      function copyToClipboard(text) {
+        navigator.clipboard.writeText(text)
+      }
+
+      function download(blob, name) {
+        if (!(blob instanceof Blob)) blob = new Blob([zip(blob)])
+
+        const a = document.createElement("a")
+        a.href = URL.createObjectURL(blob)
+        a.download = name
+        a.click()
+        URL.revokeObjectURL(a.href)
+      }
+
+      async function createFile(url) {
+        const data = await fetch(url).then((response) => response.blob())
+        return new File([data], url)
+      }
+
+      async function LipstickOn() {
+        Store.module('lipstick').update('enabled', true);
+        Store.module('lipstick').update('color', '0.85 0.43 0.5 0.8'); 
+        Store.module('lipstick').emit('changed', { enabled: true, color: '0.85 0.43 0.5 0.8' });
+      }
+
+      async function LipstickChangeColor(color) {
+        Store.module('lipstick').update('enabled', true);
+        Store.module('lipstick').update('color', color.color); 
+        Store.module('lipstick').emit('changed', { enabled: true, color: color.color });
+      }
+
+      async function LipstickChangeBrightness(brightness) {
+        Store.module('lipstick-params').update('brightness', {value: brightness.brightness});
+        Store.module('lipstick-params').emit('changed', { name: 'brightness', value: brightness.brightness });
+      }
+
+      async function LipstickChangeSaturation(saturation) {
+        Store.module('lipstick-params').update('saturation', {value: saturation.saturation});
+        Store.module('lipstick-params').emit('changed', { name: 'saturation', value: saturation.saturation });
+      }
+
+      async function LipstickChangeShineIntensity(shineIntensity) {
+        Store.module('lipstick-params').update('shineIntensity', {value: shineIntensity.shineIntensity});
+        Store.module('lipstick-params').emit('changed', { name: 'shineIntensity', value: shineIntensity.shineIntensity });
+      }
+
+      async function LipstickChangeShineBleeding(shineBleeding) {
+        Store.module('lipstick-params').update('shineBleeding', {value: shineBleeding.shineBleeding});
+        Store.module('lipstick-params').emit('changed', { name: 'shineBleeding', value: shineBleeding.shineBleeding });
+      }
+
+      async function LipstickChangeShineScale(shineScale) {
+        Store.module('lipstick-params').update('shineScale', {value: shineScale.shineScale});
+        Store.module('lipstick-params').emit('changed', { name: 'shineScale', value: shineScale.shineScale });
+      }
+
+      async function LipstickChangeGlitterGrain(glitterGrain) {
+        Store.module('lipstick-params').update('glitterGrain', {value: glitterGrain.glitterGrain});
+        Store.module('lipstick-params').emit('changed', { name: 'glitterGrain', value: glitterGrain.glitterGrain });
+      }
+
+      async function LipstickChangeGlitterIntensity(glitterIntensity) {
+        Store.module('lipstick-params').update('glitterIntensity', {value: glitterIntensity.glitterIntensity});
+        Store.module('lipstick-params').emit('changed', { name: 'glitterIntensity', value: glitterIntensity.glitterIntensity });
+      }
+
+      async function LipstickChangeGlitterBleeding(glitterBleeding) {
+        Store.module('lipstick-params').update('glitterBleeding', {value: glitterBleeding.glitterBleeding});
+        Store.module('lipstick-params').emit('changed', { name: 'glitterBleeding', value: glitterBleeding.glitterBleeding });
+      }
+
+      async function LipstickOff() {
+        Store.module('lipstick').update('enabled', false);
+        Store.module('lipstick').emit('changed', { enabled: false });
+      }
+
+      async function BrowOn() {
+        Store.module('brows').update('enabled', true);
+        Store.module('brows').update('color', '0 0 0 0.9'); 
+        Store.module('brows').emit('changed', { enabled: true });
+        Store.module('brows').emit('changed', { enabled: true, color: '0 0 0 0.9' });
+      }
+
+      async function BrowChangeColor(color) {
+        Store.module('brows').update('color', color.color); 
+        Store.module('brows').emit('changed', { enabled: true, color: color.color });
+      }
+
+      async function BrowOff() {
+        Store.module('brows').update('enabled', false);
+        Store.module('brows').emit('changed', { enabled: false });
+      }
+
+      async function EyeshadowOn() {
+        Store.module('eyes-makeup').update('eyeshadow', {enabled: true});
+        Store.module('eyes-makeup').emit('changed', { name: 'eyeshadow', enabled: true });
+      }
+
+      async function EyeshadowChangeColor(color) {
+        Store.module('eyes-makeup').update('eyeshadow', {color: color.color});
+        Store.module('eyes-makeup').emit('changed', { name: 'eyeshadow', color: color.color });
+      }
+
+      async function EyeshadowOff() {
+        Store.module('eyes-makeup').update('eyeshadow', {enabled: false});
+        Store.module('eyes-makeup').emit('changed', { name: 'eyeshadow', enabled: false });
+      }
+
+      async function EyeLinerOn() {
+        Store.module('eyes-makeup').update('eyeliner', {enabled: true});
+        Store.module('eyes-makeup').emit('changed', { name: 'eyeliner', enabled: true });
+      }
+
+      async function EyeLinerChangeColor(color) {
+        Store.module('eyes-makeup').update('eyeliner', {color: color.color});
+        Store.module('eyes-makeup').emit('changed', { name: 'eyeliner', color: color.color });
+      }
+
+      async function EyeLinerOff() {
+        Store.module('eyes-makeup').update('eyeliner', {enabled: false});
+        Store.module('eyes-makeup').emit('changed', { name: 'eyeliner', enabled: false });
+      }
+
+      async function HighlighterOn() {
+        Store.module('face-makeup').update('highlighter', {enabled: true});
+        Store.module('face-makeup').emit('changed', { name: 'highlighter', enabled: true });
+      }
+
+      async function HighlighterChangeColor(color) {
+        Store.module('face-makeup').update('highlighter', {colr: color.color});
+        Store.module('face-makeup').emit('changed', { name: 'highlighter', color: color.color });
+      }
+
+      async function HighlighterOff() {
+        Store.module('face-makeup').update('highlighter', {enabled: false});
+        Store.module('face-makeup').emit('changed', { name: 'highlighter', enabled: false });
+      }
+
+      async function ContourOn() {
+        Store.module('face-makeup').update('contour', {enabled: true});
+        Store.module('face-makeup').emit('changed', { name: 'contour', enabled: true });
+      }
+
+      async function ContourChangeColor(color) {
+        Store.module('face-makeup').update('contour', {color: color.color});
+        Store.module('face-makeup').emit('changed', { name: 'contour', color: color.color });
+      }
+
+      async function ContourOff() {
+        Store.module('face-makeup').update('contour', {enabled: false});
+        Store.module('face-makeup').emit('changed', { name: 'contour', enabled: false });
+      }
+
+      async function FoundationOn() {
+        Store.module('skin').update('softening', {strength: 0.8});
+        Store.module('skin').update('color', {enabled: true, color: '0.7 0.35 0.08 0.3'});
+        Store.module('skin').emit('changed', { name: 'softening', strength: 0.8 });
+        Store.module('skin').emit('changed', { name: 'color', enabled: true, color: '0.7 0.35 0.08 0.3' });
+      }
+
+      async function FoundationChangeColor(color) {
+        Store.module('skin').update('color', {enabled: true, color: color.color});
+        Store.module('skin').emit('changed', { name: 'color', enabled: true, color: color.color });
+      }
+
+      async function FoundationOff() {
+        Store.module('skin').update('softening', {strength: 0});
+        Store.module('skin').update('color', {enabled: false});
+        Store.module('skin').emit('changed', { name: 'softening', strength: 0 });
+        Store.module('skin').emit('changed', { name: 'color', enabled: false });
+      }
+
+      async function BlushOn() {
+        Store.module('face-makeup').update('blushes', {enabled: true});
+        Store.module('face-makeup').emit('changed', { name: 'blushes', enabled: true });
+      }
+
+      async function BlushChangeColor(color) {
+        Store.module('face-makeup').update('blushes', {color: color.color}); 
+        Store.module('face-makeup').emit('changed', { name: 'blushes', color: color.color });
+      }
+
+      async function BlushOff() {
+        Store.module('face-makeup').update('blushes', {enabled: false});
+        Store.module('face-makeup').emit('changed', { name: 'blushes', enabled: false });
+      }
+
+      const functionMap = {
+        LipstickOn,
+        LipstickOff,
+        LipstickChangeColor,
+        LipstickChangeBrightness,
+        LipstickChangeSaturation,
+        LipstickChangeShineIntensity,
+        LipstickChangeShineBleeding,
+        LipstickChangeShineScale,
+        LipstickChangeGlitterGrain,
+        LipstickChangeGlitterIntensity,
+        LipstickChangeGlitterBleeding,
+        LipstickOff,
+        BrowOn,
+        BrowChangeColor,
+        BrowOff,
+        EyeshadowOn,
+        EyeshadowChangeColor,
+        EyeshadowOff,
+        EyeLinerOn,
+        EyeLinerChangeColor,
+        EyeLinerOff,
+        HighlighterOn,
+        HighlighterChangeColor,
+        HighlighterOff,
+        ContourOn,
+        ContourChangeColor,
+        ContourOff,
+        FoundationOn,
+        FoundationChangeColor,
+        FoundationOff,
+        BlushOn,
+        BlushChangeColor,
+        BlushOn,
+        BlushOff,
+      };
+
+      const socket = new WebSocket('ws://localhost:4000');
+      socket.onopen = () => {
+        console.log('Connected to WebSocket server');
+      };
+
+      socket.onmessage = (event) => {
+        console.log('Received:', event.data);
+        const message = JSON.parse(event.data);
+
+        const { tool_name, params } = message;
+        const func = functionMap[tool_name];
+        if (typeof func === 'function') {
+          func(params);
+        } else {
+          console.error(`Function ${tool_name} not found.`);
+        }
+      };
+
+      socket.onclose = () => {
+        console.log('WebSocket connection closed');
+      };
+
+      const recordButton = document.getElementById('record-button');
+      const speechContainer = document.getElementById('speech-output-container');
+      let isRecording = false;
+    
+      let recognition;
+      if ('webkitSpeechRecognition' in window) {
+        recognition = new webkitSpeechRecognition();
+      } else if ('SpeechRecognition' in window) {
+        recognition = new SpeechRecognition();
+      }
+
+      function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+      }
+
+      async function typeText(element, text, delay = 50) {
+        for (const char of text) {
+          if (char === ' ') {
+            element.innerHTML += '&nbsp;';
+          } else {
+            element.innerHTML += char;
+          } await sleep(delay); 
+        }
+      }
+
+      async function typeTextAndSpeak(element, text, delay = 50) {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'en-US';
+
+        const selectVoice = () => {
+          const voices = window.speechSynthesis.getVoices();
+          utterance.voice = voices.find(voice => voice.name === 'Google UK English Male');
+          if (!utterance.voice) {
+            utterance.voice = voices.find(voice => voice.lang === 'en-US' && voice.name.includes('Male'));
+          }
+          window.speechSynthesis.speak(utterance);
+        };
+
+        if (window.speechSynthesis.getVoices().length === 0) {
+          window.speechSynthesis.addEventListener('voiceschanged', selectVoice);
+        } else {
+          selectVoice();
+        }
+
+        for (const char of text) {
+          if (char === ' ') {
+            element.innerHTML += '&nbsp;';
+          } else {
+            element.innerHTML += char;
+          } await sleep(delay);
+        }
+      }
+            
+      if (recognition) {
+        recognition.continuous = true;
+        recognition.interimResults = false;
+        recognition.lang = 'en-US';
+    
+        recognition.onresult = (event) => {
+          let transcriptText = '';
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            transcriptText += event.results[i][0].transcript;
+          }
+
+          const newTranscript = document.createElement('p');
+          newTranscript.className = 'transcript-box';
+          speechContainer.appendChild(newTranscript);
+          speechContainer.scrollTop = speechContainer.scrollHeight;
+
+          typeText(newTranscript, transcriptText).then(() => {
+            return fetch('http://localhost:3000/styleme_agent', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userMessage: transcriptText }),
+            });
+          })
+          .then(response => response.json())
+          .then(data => {
+            const newOutputArea = document.createElement('p');
+            newOutputArea.className = 'output-box';
+            speechContainer.appendChild(newOutputArea);
+
+            typeTextAndSpeak(newOutputArea, data.result.output).then(() => {
+              speechContainer.scrollTop = speechContainer.scrollHeight;
+            });
+          })
+          .catch(error => console.error('Error:', error));
+
+          recognition.onerror = (event) => {
+            console.error('SpeechRecognition_Error: ' + event.error);
+          };
+        };   
+      }
+    
+      recordButton.addEventListener('click', () => {
+        const recordIcon = document.getElementById('record-icon');
+        if (recognition) {
+          if (isRecording) {
+            recognition.stop();
+            recordIcon.src = "assets/icons/audio-off.svg";
+          } else {
+            recognition.start();
+            recordIcon.src = "assets/icons/audio-on.svg";
+          }
+          isRecording = !isRecording;
+        } else {
+          alert('Speech recognition not supported in this browser.');
+        }
+      });
+
+    </script>
+  </body>
+</html>
