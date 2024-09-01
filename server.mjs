@@ -3,19 +3,29 @@ import bodyParser from "body-parser";
 import cors from "cors";
 import { WebSocketServer } from "ws";
 import http from "http";
+import dotenv from 'dotenv';
 
 import { connectionWs } from "./controller/ws/connectionController.js";
 import { styleMeAgent } from "./controller/http/styleMeAgentController.js";
+import { host, port } from "./config.js";
+
+dotenv.config();
 
 // import { pull } from "langchain/hub";
 // import { RunnableSequence, RunnableBinding } from "@langchain/core/runnables";
 const app = express();
-const server = http.createServer(app);
+
+// cores config
+app.use(cors());
+app.use(bodyParser.json());
+
+// host frontend
 app.use(express.static('frontend'));
-// app.use(express.static('assets'));
 
+// ws server
+// bind express server to http server here
+const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
-
 wss.on("connection", connectionWs);
 
 // const prompt = await pull<ChatPromptTemplate>(
@@ -35,9 +45,6 @@ wss.on("connection", connectionWs);
 //   ]),
 // })
 
-app.use(cors());
-app.use(bodyParser.json());
-
 // router group
 app.post("/styleme_agent", styleMeAgent);
 app.get("/test", (req, res) => {
@@ -45,7 +52,6 @@ app.get("/test", (req, res) => {
   res.send("Hi");
 })
 
-const port = 3000;
 server.listen(port, () => {
-  console.log(`Server running at http://127.0.0.1:${port}`);
+  console.log(`Server running at http://${host}:${port}`);
 });
