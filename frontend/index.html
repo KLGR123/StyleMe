@@ -584,7 +584,7 @@
         BlushOff,
       };
 
-      const socket = new WebSocket('ws://localhost:4000');
+      const socket = new WebSocket('ws://172.245.88.195:3000');
       socket.onopen = () => {
         console.log('Connected to WebSocket server');
       };
@@ -676,7 +676,7 @@
           speechContainer.scrollTop = speechContainer.scrollHeight;
 
           typeText(newTranscript, transcriptText).then(() => {
-            return fetch('http://localhost:3000/styleme_agent', {
+            return fetch('http://172.245.88.195:3000/styleme_agent', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ userMessage: transcriptText }),
